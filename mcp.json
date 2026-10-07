@@ -1,0 +1,13 @@
+{
+    "mcpServers": {
+      "iot-gateway": {
+        "command": "python",
+        "args": ["C:\\Users\\user2\\Desktop\\tapo-server\\server.py"],
+        "env": {
+          "TAPO_EMAIL": "your_tapo@email.com",
+          "TAPO_PASSWORD": "your_password"
+        },
+        "transport": "stdio"
+      }
+    }
+  }

@@ -1,0 +1,5 @@
+mcp<2
+tapo
+fastmcp<4
+python-kasa
+tapo-mqtt
