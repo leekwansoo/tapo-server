@@ -8,7 +8,7 @@ Run: uvicorn main:app --reload --port 8000
 """
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import asyncio
@@ -17,7 +17,8 @@ import random
 import datetime
 import os
 from pathlib import Path
-
+from dotenv import load_dotenv
+import cv2
 # Import our FastMCP logic (reuse from server.py)
 # For demo, we embed state here - in real project, import from server.py
 STATE = {
@@ -40,6 +41,9 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATES_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
+
+# Load environment variables from .env
+load_dotenv()
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -144,6 +148,59 @@ async def api_control_light(payload: dict):
         "bothway": f"Server->{light_id}:{state} => Terminal reports power={power}W (UPLINK)"
     }
 
+# Tapo RTSP: rtsp://<camera-account>:<password>@<ip>:554/stream1 (stream2 = low-res)
+CAMERA_RTSP = {
+    "Camera1": os.getenv("CAMERA1_RTSP"),
+    "Camera2": os.getenv("CAMERA2_RTSP"),
+}
+print(f"Camera RTSP URLs: {CAMERA_RTSP}")
+def camera_play(url):
+    print(f"Playing camera stream from URL: {url}")
+    cap = cv2.VideoCapture(url)
+    
+    if not cap.isOpened():
+        print("Failed to open camera")
+        return
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        # automatically resize the frame to 640x360 for display
+        frame = cv2.resize(frame, (640, 360))
+        cv2.imshow("Camera", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+def _mjpeg_frames(url: str):
+
+    os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+    cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    try:
+        while cap.isOpened():
+            ok, frame = cap.read()
+            if not ok:
+                break
+            frame = cv2.resize(frame, (640, 360))
+            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if ok:
+                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+    finally:
+        cap.release()
+
+@app.get("/api/camera/{camera_id}/stream")
+async def api_camera_stream(camera_id: str):
+    """[UPLINK] RTSP -> MJPEG stream for browser <img>"""
+    url = CAMERA_RTSP.get(camera_id)
+    if not url:
+        return JSONResponse({"error": f"Set CAMERA1_RTSP/CAMERA2_RTSP env for {camera_id}"}, status_code=404)
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        return JSONResponse({"error": "opencv-python not installed"}, status_code=500)
+    return StreamingResponse(_mjpeg_frames(url), media_type="multipart/x-mixed-replace; boundary=frame")
+
 @app.post("/api/control/camera/{camera_id}")
 async def api_control_camera(camera_id: str, payload: dict):
     """[DOWNLINK] Server -> Terminal : Camera control + [UPLINK] snapshot"""
@@ -175,7 +232,7 @@ async def api_bothway_demo():
     
     logs.append(f"{datetime.datetime.now().isoformat()} [UPLINK] Temp1 -> Server: {STATE['Temp1']['temperature']}C (spontaneous)")
     logs.append(f"{datetime.datetime.now().isoformat()} [UPLINK] Camera1 -> Server: motion=True (event)")
-    
+    logs.append(f"{datetime.datetime.now().isoformat()} [UPLINK] Camera2 -> Server: motion=True (event)")
     return {"demo": "Both-way Server<->Terminal cycle", "logs": logs, "states": STATE}
 
 # WebSocket for real-time Both-way push
@@ -190,6 +247,7 @@ async def websocket_bothway(websocket: WebSocket):
                 "timestamp": datetime.datetime.now().isoformat(),
                 "Temp1": {"temperature": round(22.5 + random.random()*3.5, 1)},
                 "Camera1": {"motion": random.choice([True, False])},
+                "Camera2": {"motion": random.choice([True, False])},
                 "Switch1": {"power_w": random.randint(800,1500) if STATE["Switch1"]["state"]=="ON" else 0}
             }
             await websocket.send_text(json.dumps(data))

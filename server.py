@@ -38,13 +38,13 @@ TAPO_PASSWORD = os.getenv("TAPO_PASSWORD", "your_password")
 DEVICE_IPS = {
     "Light1": "192.168.0.101",
     "Light2": "192.168.0.102",
-    "Switch1": "192.168.0.103",  # Tapo P115
-    "Switch2": "192.168.0.104",  # Tapo P115
+    "Switch1": "192.168.0.103",  # Tapo P110M
+    "Switch2": "192.168.0.104",  # Tapo P110M
 }
 # 카메라 RTSP 주소 (예: Tapo C200, C320WS)
 CAMERA_RTSP = {
-    "Camera1": "rtsp://user:pass@192.168.0.201/stream1",
-    "Camera2": "rtsp://user:pass@192.168.0.202/stream1",
+    "Camera1": os.getenv("CAMERA1_RTSP", ""),
+    "Camera2": os.getenv("CAMERA2_RTSP", ""),
     # 시뮬레이션 모드면 더미 URL 사용
 }
 
@@ -107,19 +107,19 @@ async def get_light_status(light_id: str = "Light1") -> Dict[str, Any]:
 
 @mcp.tool()
 async def get_smart_plug_energy(plug_id: str = "Switch1") -> Dict[str, Any]:
-    """[UPLINK] Tapo P115 Smart Plug Energy Monitoring - Terminal -> Server
-    Both models P110/P115 have energy monitoring and on/off switch
+    """[UPLINK] Tapo P110M Smart Plug Energy Monitoring - Terminal -> Server
+    Both models P110M/P115 have energy monitoring and on/off switch
     """
     if TAPO_AVAILABLE and DEVICE_IPS.get(plug_id):
         try:
             client = ApiClient(TAPO_EMAIL, TAPO_PASSWORD)
-            device = await client.p115(DEVICE_IPS[plug_id])
+            device = await client.p110m(DEVICE_IPS[plug_id])
             info = await device.get_device_info()
             energy = await device.get_energy_usage()
             d = energy.to_dict()
             return {
                 "plug_id": plug_id,
-                "model": info.to_dict().get("model", "P115"),
+                "model": info.to_dict().get("model", "P110M"),
                 "relay_state": "ON" if info.to_dict()["device_on"] else "OFF",
                 "current_power_w": d.get("current_power", 0),
                 "today_energy_kwh": d.get("today_energy", 0) / 1000,
@@ -136,7 +136,7 @@ async def get_smart_plug_energy(plug_id: str = "Switch1") -> Dict[str, Any]:
     power = random.randint(800, 1500) if s["state"] == "ON" else 0
     return {
         "plug_id": plug_id,
-        "model": "Tapo P115 (Simulated)",
+        "model": "Tapo P110M (Simulated)",
         "relay_state": s["state"],
         "current_power_w": power,
         "today_energy_kwh": s.get("today_kwh", 0.45),
@@ -153,15 +153,16 @@ async def get_camera_status(camera_id: str = "Camera1") -> Dict[str, Any]:
     is_online = True
     motion_detected = random.choice([True, False])
     
-    if CV2_AVAILABLE and CAMERA_RTSP.get(camera_id) and not CAMERA_RTSP[camera_id].startswith("rtsp://user"):
+    if CV2_AVAILABLE and CAMERA_RTSP.get(camera_id) and CAMERA_RTSP[camera_id].startswith("rtsp://"):
         try:
-            cap = cv2.VideoCapture(CAMERA_RTSP[camera_id])
+            cap = cv2.VideoCapture(CAMERA_RTSP[camera_id], cv2.CAP_FFMPEG)
             is_online = cap.isOpened()
             if is_online:
                 ret, frame = cap.read()
                 if ret:
                     # 스냅샷 저장
-                    snap_path = f"/tmp/{camera_id}_snapshot.jpg"
+                    os.makedirs("static/snapshots", exist_ok=True)
+                    snap_path = f"static/snapshots/{camera_id}.jpg"
                     cv2.imwrite(snap_path, frame)
             cap.release()
         except:
@@ -170,7 +171,7 @@ async def get_camera_status(camera_id: str = "Camera1") -> Dict[str, Any]:
     return {
         "camera_id": camera_id,
         "online": is_online,
-        "stream_url": CAMERA_RTSP.get(camera_id, "simulated"),
+        "stream_url": f"/api/camera/{camera_id}/stream",
         "recording": True,
         "motion_detected": motion_detected,
         "resolution": "1920x1080",
