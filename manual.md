@@ -246,4 +246,5 @@ Tapo C200	Wi-Fi RTSP	Tapo 앱 + RTSP 활성화	X	X	CAMERA_RTSP에 URL 등록
 
 **작성자: IoT Gateway Project Team**
 **문의: FastAPI 로그 확인 - http://localhost:8000/api/health**
+
 FastAPI Server에 문의 창 설계 필요
