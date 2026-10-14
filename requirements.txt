@@ -10,4 +10,5 @@ python-dotenv
 python-multipart
 opencv-python
 websockets
-
+bs4
+python-dotenv
